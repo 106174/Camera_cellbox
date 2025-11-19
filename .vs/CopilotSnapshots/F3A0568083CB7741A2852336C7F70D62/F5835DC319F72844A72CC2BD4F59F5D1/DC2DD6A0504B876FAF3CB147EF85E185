@@ -1,0 +1,430 @@
+﻿using OpenCvSharp;
+using OpenCvSharp.WpfExtensions;
+using System;
+using System.IO;
+using System.IO.Ports;
+using System.Threading;
+using System.Windows;
+using System.Windows.Media.Imaging;
+using Microsoft.Win32;
+using System.Windows.Forms; // 注意是 WinForms 的 FolderBrowserDialog
+using LiveCharts;
+using LiveCharts.Wpf;
+using LiveCharts.Defaults;
+using LiveCharts.Configurations;
+using System.Collections.Generic;
+using System.Windows.Threading;
+
+namespace Camera_Organoids
+{
+    public partial class MainWindow : System.Windows.Window
+    {
+        private VideoCapture _capture;
+        private Mat _frame;
+        private Thread _cameraThread;
+        private bool _isRunning;
+        private string _saveFolderPath = "";
+        // 声明串口对象
+        private SerialPort serialPort;
+        // 字段声明
+        public ChartValues<DateTimePoint> Co2Values = new ChartValues<DateTimePoint>();
+        public ChartValues<DateTimePoint> TempValues = new ChartValues<DateTimePoint>();
+        public Func<double, string> TimeFormatter = value =>
+        {
+            try
+            {
+                // LiveCharts X轴的值是DateTime.Ticks
+                var dt = new DateTime((long)value);
+                return dt.ToString("HH:mm:ss");
+            }
+            catch
+            {
+                return "";
+            }
+        };
+
+        public MainWindow()
+        {
+            // —— VERY IMPORTANT —— 在 InitializeComponent 之前注册 DateTimePoint 映射
+            var dayConfig = Mappers.Xy<DateTimePoint>()
+                .X(dp => dp.DateTime.Ticks)   // X 使用 Ticks
+                .Y(dp => dp.Value);           // Y 使用值
+            Charting.For<DateTimePoint>(dayConfig);
+
+            // 现在再实例化 XAML 中的控件
+            InitializeComponent();
+
+            // 绑定上下文
+            DataContext = this;
+
+            StartCamera();
+            RefreshPorts();
+
+            // 初始化 Series（图例/曲线）
+            Co2Chart.Series = new SeriesCollection
+            {
+                new LineSeries { Title = "CO2", Values = Co2Values, PointGeometry = null }
+            };
+
+            TempChart.Series = new SeriesCollection
+            {
+                new LineSeries { Title = "温度", Values = TempValues, PointGeometry = null }
+            };
+
+            // 确保 X 轴使用时间格式（直接在代码设置，避免 binding 时机问题）
+            if (Co2Chart.AxisX.Count == 0)
+                Co2Chart.AxisX.Add(new Axis { Title = "时间", LabelFormatter = TimeFormatter });
+            else
+                Co2Chart.AxisX[0].LabelFormatter = TimeFormatter;
+
+            if (TempChart.AxisX.Count == 0)
+                TempChart.AxisX.Add(new Axis { Title = "时间", LabelFormatter = TimeFormatter });
+            else
+                TempChart.AxisX[0].LabelFormatter = TimeFormatter;
+        }
+
+
+        private DispatcherTimer _autoCaptureTimer;
+
+        private void StartCamera()
+        {
+            _capture = new VideoCapture(0);
+            _frame = new Mat();
+            _isRunning = true;
+
+            _cameraThread = new Thread(() =>
+            {
+                while (_isRunning)
+                {
+                    _capture.Read(_frame);
+                    if (_frame.Empty()) continue;
+
+                    var image = _frame.ToBitmapSource();
+                    image.Freeze();
+
+                    Dispatcher.Invoke(() =>
+                    {
+                        CameraView.Source = image;
+                    });
+
+                    Thread.Sleep(30);
+                }
+            });
+            _cameraThread.IsBackground = true;
+            _cameraThread.Start();
+            // ====== 自动拍照定时器 ======
+            _autoCaptureTimer = new DispatcherTimer();
+            _autoCaptureTimer.Interval = TimeSpan.FromSeconds(300); // 每5秒拍一张
+            _autoCaptureTimer.Tick += (s, e) => AutoCapture();
+            _autoCaptureTimer.Start();
+        }
+
+        private void AutoCapture()
+        {
+            if (string.IsNullOrEmpty(_saveFolderPath)) return;
+
+            if (_frame != null && !_frame.Empty())
+            {
+                string filename = $"auto_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+                string fullPath = Path.Combine(_saveFolderPath, filename);
+
+                try
+                {
+                    Cv2.ImWrite(fullPath, _frame);
+                    // 这里可以去掉弹窗，避免频繁打扰
+                    Console.WriteLine("自动截图已保存: " + fullPath);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("保存失败: " + ex.Message);
+                }
+            }
+        }
+
+
+        private void SelectPathButton_Click(object sender, RoutedEventArgs e)
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "选择截图保存文件夹";
+                dialog.ShowNewFolderButton = true;
+
+                var result = dialog.ShowDialog();
+                if (result == System.Windows.Forms.DialogResult.OK)
+                {
+                    _saveFolderPath = dialog.SelectedPath;
+                    SavePathBox.Text = _saveFolderPath;
+                }
+            }
+        }
+
+        private void CaptureButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(_saveFolderPath))
+            {
+                System.Windows.MessageBox.Show("请先选择保存路径！", "提示", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                return;
+            }
+
+            if (_frame != null && !_frame.Empty())
+            {
+                string filename = $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+                string fullPath = Path.Combine(_saveFolderPath, filename);
+
+                try
+                {
+                    Cv2.ImWrite(fullPath, _frame);
+                    System.Windows.MessageBox.Show("截图已保存:\n" + fullPath, "成功", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    System.Windows.MessageBox.Show("保存失败: " + ex.Message, "错误", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+                }
+            }
+        }
+        // 关闭窗口时自动断开串口 断开摄像头
+        protected override void OnClosed(EventArgs e)
+        {
+            _isRunning = false;
+            _cameraThread?.Join();
+            _capture?.Release();
+            _frame?.Dispose();
+            if (serialPort != null && serialPort.IsOpen)
+                serialPort.Close();
+            base.OnClosed(e);
+        }
+
+        // 刷新串口列表
+        private void RefreshPorts()
+        {
+            cmbPorts.Items.Clear();
+            var ports = SerialPort.GetPortNames();
+            Array.Sort(ports);
+
+            foreach (var port in ports)
+                cmbPorts.Items.Add(port);
+
+            if (cmbPorts.Items.Count > 0)
+                cmbPorts.SelectedIndex = 0;
+        }
+
+        private void refreshCamera(object sender, RoutedEventArgs e)
+        {
+            StartCamera();
+        }
+
+        // “刷新”按钮点击事件
+        private void BtnRefresh_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshPorts();
+        }
+
+        // “连接”按钮点击事件
+        private void BtnConnect_Click(object sender, RoutedEventArgs e)
+        {
+            if (serialPort != null && serialPort.IsOpen)
+            {
+                System.Windows.MessageBox.Show("串口已连接。");
+                return;
+            }
+
+            if (cmbPorts.SelectedItem == null)
+            {
+                System.Windows.MessageBox.Show("请先选择一个串口！");
+                return;
+            }
+
+            try
+            {
+                serialPort = new SerialPort(cmbPorts.SelectedItem.ToString(), 115200); // 默认波特率9600
+                serialPort.Open();
+                System.Windows.MessageBox.Show("串口连接成功！");
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show("连接失败: " + ex.Message);
+            }
+            serialPort.DataReceived += SerialPort_DataReceived;
+        }
+
+        // “断开”按钮点击事件
+        private void BtnDisconnect_Click(object sender, RoutedEventArgs e)
+        {
+            if (serialPort != null && serialPort.IsOpen)
+            {
+                try
+                {
+                    serialPort.Close();
+                    System.Windows.MessageBox.Show("串口已断开。");
+                }
+                catch (Exception ex)
+                {
+                    System.Windows.MessageBox.Show("断开失败: " + ex.Message);
+                }
+            }
+            else
+            {
+                System.Windows.MessageBox.Show("串口尚未连接。");
+            }
+        }
+        private void Motor_Forward(object sender, RoutedEventArgs e)
+        {
+            if (serialPort == null || !serialPort.IsOpen)
+            {
+                System.Windows.MessageBox.Show("串口未连接！");
+                return;
+            }
+
+            string numberText = editableComboBox.Text.Trim();
+
+            if (!int.TryParse(numberText, out int steps))
+            {
+                System.Windows.MessageBox.Show("请输入合法数字！");
+                return;
+            }
+
+            try
+            {
+                // 1. 发送使能命令 'V\n'
+                serialPort.WriteLine("V");
+
+                // 2. 等待 Arduino 处理 V（可选）
+                Thread.Sleep(100); // 可视情况调整
+
+                // 3. 发送数字步数（如 "200\n"）
+                serialPort.WriteLine(numberText);
+
+                //System.Windows.MessageBox.Show($"已发送 V + {numberText}");
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show("发送失败：" + ex.Message);
+            }
+        }
+
+        private void Motor_Backwards(object sender, RoutedEventArgs e)
+        {
+            if (serialPort == null || !serialPort.IsOpen)
+            {
+                System.Windows.MessageBox.Show("串口未连接！");
+                return;
+            }
+
+            string numberText = editableComboBox.Text.Trim();
+
+            if (!int.TryParse(numberText, out int steps))
+            {
+                System.Windows.MessageBox.Show("请输入合法数字！");
+                return;
+            }
+
+            // 发送前强制加负号
+            steps = -Math.Abs(steps);  // 无论用户输正负数，最终都变成负数
+            string sendValue = steps.ToString();
+
+
+            try
+            {
+                // 1. 发送使能命令 'V\n'
+                serialPort.WriteLine("V");
+
+                // 2. 等待 Arduino 处理 V（可选）
+                Thread.Sleep(100); // 可视情况调整
+
+                // 3. 发送数字步数（如 "200\n"）
+                serialPort.WriteLine(sendValue);
+
+                //System.Windows.MessageBox.Show($"已发送 V + {numberText}");
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show("发送失败：" + ex.Message);
+            }
+        }
+
+        private void Motor_Stop(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // 1. 发送使能命令 'V\n'
+                serialPort.WriteLine("C");
+
+                System.Windows.MessageBox.Show("电机停止使能");
+            } 
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show("发送失败：" + ex.Message);
+            }
+        }
+
+        private void LightOn(object sender, RoutedEventArgs e)
+        {
+            if (serialPort == null || !serialPort.IsOpen)
+            {
+                System.Windows.MessageBox.Show("串口未连接！");
+                return;
+            }
+            try
+            {
+                // 发送使能命令 'L\n'
+                serialPort.WriteLine("Z");
+                System.Windows.MessageBox.Show("灯光已开启");
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show("发送失败：" + ex.Message);
+            }
+        }
+
+        private void LightOff(object sender, RoutedEventArgs e)
+        {
+            if (serialPort == null || !serialPort.IsOpen)
+            {
+                System.Windows.MessageBox.Show("串口未连接！");
+                return;
+            }
+            try
+            {
+                // 发送使能命令 'L\n'
+                serialPort.WriteLine("X");
+                System.Windows.MessageBox.Show("灯光已关闭");
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show("发送失败：" + ex.Message);
+            }
+        }
+
+        // 解析串口数据并更新图表
+        // 串口数据接收
+        private void SerialPort_DataReceived(object sender, SerialDataReceivedEventArgs e)
+        {
+            string line = serialPort.ReadLine();
+            // 日志输出到调试窗口
+            System.Diagnostics.Debug.WriteLine("串口收到: " + line);
+            var now = DateTime.Now;
+            // 匹配 co2（支持小数点，忽略大小写）
+            var co2Match = System.Text.RegularExpressions.Regex.Match(line, @"co2[:：]?\s*([\d\.]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (co2Match.Success)
+            {
+                double co2 = double.Parse(co2Match.Groups[1].Value);
+                Dispatcher.Invoke(() =>
+                {
+                    Co2Values.Add(new DateTimePoint(now, co2));
+                    if (Co2Values.Count > 50) Co2Values.RemoveAt(0);
+                });
+            }
+            // 匹配温度（支持小数点）
+            var tempMatch = System.Text.RegularExpressions.Regex.Match(line, @"temp[:：]?\s*([\d\.]+)");
+            if (tempMatch.Success)
+            {
+                double temp = double.Parse(tempMatch.Groups[1].Value);
+                Dispatcher.Invoke(() =>
+                {
+                    TempValues.Add(new DateTimePoint(now, temp));
+                    if (TempValues.Count > 50) TempValues.RemoveAt(0);
+                });
+            }
+        }
+    }
+}
