@@ -6,7 +6,7 @@
         xmlns:local="clr-namespace:Camera_Organoids"
         xmlns:lvc="clr-namespace:LiveCharts.Wpf;assembly=LiveCharts.Wpf"
         mc:Ignorable="d"
-        Title="MainWindow" Height="1200" Width="2300">
+        Title="MainWindow" Height="1200" Width="2400">
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
@@ -14,7 +14,7 @@
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="300"/>
+            <ColumnDefinition Width="350"/>
             <ColumnDefinition Width="1000"/>
         </Grid.ColumnDefinitions>
 
@@ -83,7 +83,7 @@
             <Button Content="开灯" Click="LightOn" FontSize="20" Margin="0 30 0 10" Height="35" Width="100"/>
             <Button Content="关灯" Click="LightOff" FontSize="20" Margin="10" Height="35" Width="100"/>
             <!-- 图像增强调节 -->
-            <GroupBox Header="图像增强参数" Margin="10" FontSize="20">
+            <GroupBox Header="图像增强参数" Margin="5" FontSize="20">
                 <StackPanel>
                     <TextBlock Text="全局对比度 (Alpha)" Margin="0 20 0 10" />
                     <Slider x:Name="SliderAlpha" Minimum="1.0" Maximum="2.0" Value="1.5" TickFrequency="0.1" IsSnapToTickEnabled="True" ValueChanged="EnhancerParamsChanged"/>
@@ -103,6 +103,21 @@
 
                     <TextBlock Text="伽马校正系数 (Gamma)" Margin="0 20 0 10"/>
                     <Slider x:Name="SliderGamma" Minimum="0.8" Maximum="1.5" Value="1.2" TickFrequency="0.05" IsSnapToTickEnabled="True" ValueChanged="EnhancerParamsChanged"/>
+                    <!-- 启用锐化 -->
+                    <CheckBox x:Name="ChkSharpen" Content="启用锐化" Checked="ChkSharpen_Checked" Unchecked="ChkSharpen_Checked" Margin="0,20"/>
+
+                    <!-- 锐化强度 -->
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="锐化强度：" VerticalAlignment="Center"/>
+                        <Slider x:Name="SliderSharpenStrength"
+                          Minimum="0.1"
+                          Maximum="1.0"
+                          Value="0.5"
+                          Width="150"
+                          Margin="5,0"
+                          ValueChanged="SliderSharpenStrength_ValueChanged"/>
+                        <TextBlock x:Name="TxtSharpenValue" Text="0.5" VerticalAlignment="Center"/>
+                    </StackPanel>
                 </StackPanel>
             </GroupBox>
 

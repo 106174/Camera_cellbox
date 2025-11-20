@@ -42,14 +42,14 @@
     </dependentAssembly>
   </dependency>
   <dependency>
-    <dependentAssembly dependencyType="install" allowDelayedBinding="true" codebase="Camera_Organoids.exe" size="28688">
+    <dependentAssembly dependencyType="install" allowDelayedBinding="true" codebase="Camera_Organoids.exe" size="30224">
       <assemblyIdentity name="Camera_Organoids" version="1.0.0.0" language="neutral" processorArchitecture="msil" />
       <hash>
         <dsig:Transforms>
           <dsig:Transform Algorithm="urn:schemas-microsoft-com:HashTransforms.Identity" />
         </dsig:Transforms>
         <dsig:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha256" />
-        <dsig:DigestValue>u3AYuvyCRR/Sa53y3fwsJBonXT+1XXMmoOD2kcVrf0s=</dsig:DigestValue>
+        <dsig:DigestValue>GJCvkydnxGSXY1ZmwrHsqiO1wkyVur+e5CYEAEeGIfo=</dsig:DigestValue>
       </hash>
     </dependentAssembly>
   </dependency>

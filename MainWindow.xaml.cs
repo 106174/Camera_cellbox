@@ -363,6 +363,17 @@ namespace Camera_Organoids
         {
             EnhancerParamsChanged(sender, null); // 如果EnhancerParamsChanged需要参数，可以适当调整
         }
+        private void ChkSharpen_Checked(object sender, RoutedEventArgs e)
+        {
+            _enhancer.EnableSharpen = ChkSharpen.IsChecked == true;
+        }
+        private void SliderSharpenStrength_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (TxtSharpenValue == null )
+                return; // 或者抛出更友好的提示
+            _enhancer.SharpenStrength = SliderSharpenStrength.Value;
+            TxtSharpenValue.Text = SliderSharpenStrength.Value.ToString("0.00");
+        }
 
         public class ImageEnhancer
         {
@@ -372,6 +383,8 @@ namespace Camera_Organoids
             public double ClipLimit { get; set; } = 2.0;  // CLAHE对比度限制（1.0-3.0为宜） 默认2.0
             public OpenCvSharp.Size TileGridSize { get; set; } = new OpenCvSharp.Size(8, 8);  // CLAHE网格大小 默认8*8
             public double Gamma { get; set; } = 1.2;      // 伽马矫正系数（0.8-1.5为宜） 默认1.2
+            public double SharpenStrength { get; set; } = 0.5;  // 锐化推荐 0.3-0.8
+            public bool EnableSharpen { get; set; } = false;
 
             /// <summary>
             /// 对摄像头帧进行增强处理
@@ -412,7 +425,13 @@ namespace Camera_Organoids
 
                 // 6. 伽马矫正（优化明暗细节）
                 Mat result = GammaCorrection(enhancedBgr, Gamma);
-
+                // 7. 锐化
+                if (EnableSharpen)
+                {
+                    var sharp = Sharpen(result, SharpenStrength);
+                    result.Dispose();            // 替换掉旧图 防止内存泄漏
+                    result = sharp;
+                }
                 // 释放中间变量（避免内存泄漏）
                 ycrcb.Dispose();
                 foreach (var ch in channels) ch.Dispose();
@@ -450,6 +469,18 @@ namespace Camera_Organoids
                 Cv2.LUT(image, lut, result);
                 lut.Dispose();
                 return result;
+            }
+            // 新增锐化
+            public Mat Sharpen(Mat img, double strength = 1.0)
+            {
+                Mat blurred = new Mat();
+                Cv2.GaussianBlur(img, blurred, new OpenCvSharp.Size(0, 0), 3);
+
+                Mat sharp = new Mat();
+                Cv2.AddWeighted(img, 1 + strength, blurred, -strength, 0, sharp);
+
+                blurred.Dispose();
+                return sharp;
             }
         }
 
